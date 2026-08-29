@@ -1,0 +1,14 @@
+import std;
+import mcpp;
+import clangtidy;
+
+int main() {
+    clangtidy::options o;
+    // The example names its own clang-tidy so it can run without resolving a
+    // toolchain package; a real project declares llvm in [build-dependencies]
+    // and lets `dep_bin` answer.
+    if (const char* p = mcpp::env_or("CLANG_TIDY"); p && *p) o.program = p;
+    o.args = {"--checks=-*,bugprone-*"};
+    std::vector<std::string> files{ "src/main.cpp" };
+    return clangtidy::check(files, o) ? 0 : 1;
+}

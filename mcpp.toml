@@ -1,0 +1,27 @@
+# clangtidy — clang-tidy as a build rule.
+#
+# `mcpp::action` with `role = "check"` puts analysis in the build graph: one
+# edge per file, incremental, parallel, and attributable to the file that
+# failed rather than to "the build program exited 1".
+#
+# ⚠️ REQUIRES mcpp >= 2026.8.29.1. Before it, a check's COMMAND had to create
+# the stamp file that satisfies its edge — and clang-tidy writes nothing on
+# success, so every consumer wrote the same wrapper script. That wrapper could
+# not be written portably at all: an action's command is an argv with no shell
+# assumed, which is correct for Windows and leaves nothing there to touch a
+# file with. mcpp now writes the stamp when the command exits zero, which is
+# what makes this package possible rather than merely convenient.
+#
+# The package name and the module name are equal, as every rule package's
+# should be: mcpp < 2026.8.29.1 registers a host module under the dependency's
+# `package.name`, and from that release under what the interface declares.
+[package]
+name        = "clangtidy"
+namespace   = "mcpplibs"
+version     = "0.1.0"
+description = "clang-tidy as an mcpp build rule (role = check)"
+license     = "Apache-2.0"
+platforms   = ["linux", "macos", "windows"]
+
+[targets.clangtidy]
+kind = "lib"

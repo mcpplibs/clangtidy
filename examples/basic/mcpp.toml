@@ -1,0 +1,8 @@
+[package]
+name    = "basic"
+version = "0.1.0"
+
+# A rule is consumed only by a build.mcpp, so compiling it proves nothing.
+# This example is the test: it builds, and the check runs as a graph edge.
+[build-dependencies]
+clangtidy = { path = "../..", host-module = true }
