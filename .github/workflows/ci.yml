@@ -32,6 +32,47 @@ jobs:
           xlings install "mcpp@${MCPP_VERSION}" -y
           mcpp --version
 
+      # The package name and the module name must stay EQUAL, and until now
+      # nothing enforced that. mcpp < 2026.8.29.1 registers a host module under
+      # the dependency's `package.name`; from that release it uses the name the
+      # interface declares. Only equality satisfies both engines.
+      #
+      # ⚠️ AND THE BREAK IS ASYMMETRIC, so a green run on one compiler proves
+      # nothing: renaming either alone still builds under GCC, which finds a BMI
+      # by its declared name through gcm.cache, while Clang and MSVC are handed
+      # an explicit `<name>=<bmi>` mapping built from the registered name and
+      # fail. A constraint that lives only in a comment is not a constraint.
+      - name: The package name and the module name agree
+        run: |
+          set -euo pipefail
+          toml=mcpp.toml
+          iface=src/clangtidy.cppm
+          test -f "$toml"  || { echo "FAIL: no $toml";  exit 1; }
+          test -f "$iface" || { echo "FAIL: no $iface"; exit 1; }
+          # One awk, no pipeline: `... | head -1` would let the writer take
+          # SIGPIPE and, under `pipefail`, report 141 for a successful match.
+          # Comment lines begin with '#', so neither pattern can match one --
+          # this must not be answerable by the prose that explains the rule.
+          pkg=$(awk '/^\[package\]/{p=1;next} /^\[/{p=0}
+                     p && /^[[:space:]]*name[[:space:]]*=/ {
+                         if (match($0, /"[^"]*"/)) {
+                             print substr($0, RSTART+1, RLENGTH-2); exit } }' "$toml")
+          mod=$(awk '/^[[:space:]]*export[[:space:]]+module[[:space:]]+/ {
+                         sub(/^[[:space:]]*export[[:space:]]+module[[:space:]]+/, "")
+                         sub(/[[:space:]]*;.*$/, "")
+                         print; exit }' "$iface")
+          echo "package.name='${pkg}'  export module='${mod}'"
+          # Both must be non-empty. An extractor that silently matched nothing
+          # would otherwise make this step pass on a file it never parsed.
+          [ -n "$pkg" ] || { echo "FAIL: could not read [package].name from $toml"; exit 1; }
+          [ -n "$mod" ] || { echo "FAIL: could not read 'export module' from $iface"; exit 1; }
+          [ "$pkg" = "$mod" ] || {
+              echo "FAIL: package name '$pkg' != module name '$mod'"
+              echo "Consumers on mcpp < 2026.8.29.1 import the package name;"
+              echo "from 2026.8.29.1 they import the declared name. Keep them equal."
+              exit 1; }
+          echo "OK: both are '$pkg'"
+
       - name: Install clang-tidy
         run: |
           sudo apt-get update -qq
