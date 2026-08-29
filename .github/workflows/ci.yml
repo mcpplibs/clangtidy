@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  example:
+    name: the example builds, and the check actually gates it
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install xlings + mcpp
+        env:
+          # ⚠️ NOT `latest`. This rule needs the release in which mcpp began
+          # writing a check's stamp; on anything older the example builds a
+          # check whose edge is never satisfied, which does not fail — it just
+          # re-runs forever. Pinning is what makes a green run mean something.
+          XLINGS_VERSION: '2026.8.27.5'
+          MCPP_VERSION: '2026.8.29.1'
+        run: |
+          set -euo pipefail
+          tarball="xlings-${XLINGS_VERSION}-linux-x86_64.tar.gz"
+          curl -fsSL --retry 3 --retry-all-errors -o "/tmp/${tarball}" \
+            "https://github.com/d2learn/xlings/releases/download/v${XLINGS_VERSION}/${tarball}"
+          tar -xzf "/tmp/${tarball}" -C /tmp
+          "/tmp/xlings-${XLINGS_VERSION}-linux-x86_64/subos/default/bin/xlings" self install
+          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.xlings/subos/current/bin:$PATH"
+          xlings install "mcpp@${MCPP_VERSION}" -y
+          mcpp --version
+
+      - name: Install clang-tidy
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang-tidy
+          echo "CLANG_TIDY=$(command -v clang-tidy)" >> "$GITHUB_ENV"
+          clang-tidy --version | head -2
+
+      - name: The example builds
+        working-directory: examples/basic
+        run: mcpp build
+
+      # ⚠️ THE CRITERION IS THE STAMP, NOT THE EXIT CODE ABOVE.
+      #
+      # ninja does not fail when a declared output goes unproduced: it leaves
+      # the file absent and re-runs that edge on every build afterwards. So a
+      # build in which the stamp mechanism did nothing at all is still green,
+      # and the only symptom is work silently redone. Asserting on `mcpp build`
+      # succeeding would pass against an engine that has none of this.
+      - name: The engine wrote the check's stamp
+        working-directory: examples/basic
+        run: |
+          set -euo pipefail
+          n=$(find target -name '*.stamp' | wc -l)
+          find target -name '*.stamp' | sed 's/^/  /'
+          [ "$n" = "1" ] || { echo "expected exactly one stamp, found $n"; exit 1; }
+
+      - name: A finding fails the build
+        working-directory: examples/basic
+        run: |
+          set -uo pipefail
+          # clang-tidy exits 0 while reporting a diagnostic; the rule turns
+          # warnings into errors by default, and this is what proves it.
+          cat > src/main.cpp <<'EOF'
+          #include <cstdio>
+          #include <cstring>
+          int main() {
+              char buf[4];
+              std::memcpy(buf, "hello", 5);   // bugprone-not-null-terminated-result
+              std::printf("%s\n", buf);
+          }
+          EOF
+          if mcpp build > out.log 2>&1; then
+              cat out.log
+              echo "FAIL: a real clang-tidy finding did not fail the build"
+              exit 1
+          fi
+          grep -qi 'not null-terminated' out.log || {
+              cat out.log
+              echo "FAIL: the build failed without reporting what the check found"
+              exit 1; }
+          echo "OK: the finding gated the build"
